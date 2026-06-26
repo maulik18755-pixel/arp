@@ -110,8 +110,8 @@ with st.sidebar:
 # ── MAIN AREA ────────────────────────────────────────────────
 st.markdown("# 🛢️ Agentic Refinery Planner")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "⚡ Optimizer", "🔄 What-If", "📈 Sensitivity", "💬 Chat", "📊 Insights"
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "⚡ Optimizer", "🔄 What-If", "📈 Sensitivity", "💬 Chat", "📊 Insights", "🏗️ Architecture"
 ])
 
 
@@ -439,3 +439,214 @@ with tab5:
                 delete_scenario(s["id"])
             st.success("All scenarios cleared.")
             st.rerun()
+
+
+# ── TAB 6: ARCHITECTURE ──────────────────────────────────────
+with tab6:
+    st.markdown("### 🏗️ How ARP Was Built")
+    st.markdown("""
+    ARP (Agentic Refinery Planner) is a chat-based, AI-agentic refinery planning tool that
+    replaces static LP workflows — like those in Aspen PIMS — with conversational scenario
+    exploration, parallel what-if analysis, and learning from past runs.
+    """)
+
+    st.markdown("---")
+
+    # Architecture diagram
+    st.markdown("### System Architecture")
+    st.code("""
+    ┌─────────────────────────────────────────────────────────┐
+    │              STREAMLIT WEB UI (app.py)                   │
+    │   ⚡ Optimizer │ 🔄 What-If │ 📈 Sensitivity │ 💬 Chat   │
+    └────────┬──────────┬──────────────┬──────────────────────┘
+             │          │              │
+             ▼          ▼              ▼
+    ┌─────────────────────────────────────────────────────────┐
+    │            AGENT ORCHESTRATOR (local_agent.py)           │
+    │   Natural language parsing → Tool dispatch → Response    │
+    │   Pattern matching routes to: solve / compare / modify   │
+    └────┬──────────┬──────────────┬──────────────────────────┘
+         │          │              │
+         ▼          ▼              ▼
+    ┌─────────┐ ┌──────────┐ ┌────────────┐
+    │ SOLVER  │ │ SCENARIO │ │  LEARNING  │
+    │ ENGINE  │ │  STORE   │ │   LOOP     │
+    │         │ │          │ │            │
+    │ scipy   │ │ JSON     │ │ JSONL log  │
+    │ HiGHS   │ │ files    │ │ + insight  │
+    │ LP      │ │ CRUD     │ │ analysis   │
+    └─────────┘ └──────────┘ └────────────┘
+    """, language=None)
+
+    st.markdown("---")
+
+    # Component breakdown
+    st.markdown("### Component Breakdown")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("""
+        #### Core Engine
+        | File | Purpose |
+        |------|---------|
+        | `solver.py` | LP optimization using scipy HiGHS — builds objective function, constraints, solves in ~10ms |
+        | `models.py` | Domain dataclasses: `Crude`, `Product`, `ProcessUnit`, `Scenario`, `SolveResult` |
+        | `sample_data.py` | Built-in crude/product library with validated yield vectors (must sum to 1.0) |
+        | `scenarios.py` | Scenario CRUD — create, clone (deep copy), modify, compare, persist as JSON |
+        | `learning.py` | Append-only JSONL log of every run; surfaces patterns (binding constraints, margin trends) |
+        """)
+
+    with col2:
+        st.markdown("""
+        #### Interface Layer
+        | File | Purpose |
+        |------|---------|
+        | `app.py` | Streamlit web UI — 6 tabs for optimizer, what-if, sensitivity, chat, insights, architecture |
+        | `local_agent.py` | NLP command parser — routes natural language to solver tools (runs locally, no API needed) |
+        | `agent.py` | Claude API agent (requires API key) — full function-calling with agentic tool-use loop |
+        | `main.py` | Rich terminal chat interface — alternative to web UI |
+        | `CLAUDE.md` | AI coding guard file — hard rules, data model spec, regression anchors for Claude Code |
+        """)
+
+    st.markdown("---")
+
+    # LP Formulation
+    st.markdown("### LP Formulation")
+    st.markdown("""
+    The optimizer solves a **Linear Program** to maximize refinery margin:
+    """)
+
+    st.latex(r"""
+    \max \sum_{c \in \text{Crudes}} x_c \cdot \left(
+        \sum_{p \in \text{Products}} y_{c,p} \cdot \text{price}_p
+        - \text{cost}_c - \text{opex}
+    \right)
+    """)
+
+    st.markdown("""
+    **Subject to:**
+    """)
+
+    st.latex(r"""
+    \begin{aligned}
+    & x_c \leq \text{availability}_c & \forall \; c \in \text{Crudes} \\
+    & \sum_c x_c \leq \text{CDU capacity} \\
+    & \sum_c y_{c,p} \cdot x_c \geq \text{min\_demand}_p & \forall \; p \in \text{Products} \\
+    & \sum_c y_{c,p} \cdot x_c \leq \text{max\_demand}_p & \forall \; p \in \text{Products} \\
+    & x_c \geq 0 & \forall \; c
+    \end{aligned}
+    """)
+
+    st.markdown("""
+    Where:
+    - $x_c$ = barrels/day of crude $c$ processed
+    - $y_{c,p}$ = yield fraction of product $p$ from crude $c$
+    - Solved using **scipy.optimize.linprog** with the HiGHS solver (interior-point/simplex)
+    """)
+
+    st.markdown("---")
+
+    # Key design decisions
+    st.markdown("### Key Design Decisions")
+
+    st.markdown("""
+    **1. Scenario Isolation (Deep Copy)**
+    Every what-if analysis creates a fully independent clone via JSON serialization.
+    Modifying one scenario never mutates another — critical for reliable parallel analysis.
+
+    **2. Loud Failure Over Silent Degradation**
+    If the LP is infeasible, the system says so explicitly and identifies conflicting constraints.
+    It never silently drops constraints or fabricates results.
+
+    **3. Learning Loop (Append-Only Log)**
+    Every optimization run is logged to `learning_log.jsonl` with objective value, binding constraints,
+    and optional user feedback. The insights engine reads this log to surface patterns like
+    "Maya availability has been binding in 100% of runs" — actionable intelligence for planners.
+
+    **4. Spec-First Development**
+    The project was built using a `CLAUDE.md` guard file — a specification document with hard rules,
+    data models, regression test anchors, and coding conventions — read by Claude Code before
+    writing any code. This ensures consistency and prevents common failure modes.
+    """)
+
+    st.markdown("---")
+
+    # What this replaces
+    st.markdown("### What This Replaces vs. Traditional Tools")
+
+    compare_data = {
+        "Capability": [
+            "Interface",
+            "Scenario Analysis",
+            "What-If Speed",
+            "Learning from Past Runs",
+            "Collaboration",
+            "Cost",
+            "Extensibility",
+        ],
+        "Aspen PIMS": [
+            "Spreadsheet-style config files",
+            "Single scenario, manual re-run",
+            "Minutes per scenario change",
+            "None — no memory between sessions",
+            "License-locked, single user",
+            "$50K–200K/year license",
+            "Vendor-dependent customization",
+        ],
+        "ARP": [
+            "Natural language chat + web dashboard",
+            "Parallel scenarios with auto-comparison",
+            "~10ms per solve, instant branching",
+            "JSONL learning loop surfaces patterns",
+            "Web URL, shareable, open source",
+            "Free (open source, scipy solver)",
+            "Python — extend with Claude Code",
+        ],
+    }
+    st.dataframe(pd.DataFrame(compare_data), use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # Source references
+    st.markdown("### 📚 Source References & Acknowledgments")
+
+    st.markdown("""
+    **Open-Source Foundation:**
+    - [ND-Pyomo-Cookbook: Gasoline Blending](https://jckantor.github.io/ND-Pyomo-Cookbook/notebooks/02.05-Gasoline-Blending.html)
+      — Jeff Kantor, Notre Dame. The standard open-source reference for refinery LP formulations
+      in Python. ARP's solver architecture and constraint linearization approach are derived from
+      these examples.
+    - [scipy.optimize.linprog (HiGHS)](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linprog.html)
+      — High-performance LP solver used as the backend engine.
+
+    **Refinery Economics & LP Modeling Theory:**
+    - Gary, Handwerk & Kaiser — *Petroleum Refining: Technology and Economics* (5th Ed.)
+      — Refining economics, yield structures, and margin analysis fundamentals.
+    - Liu, Chang & Pashikanti — *Petroleum Refinery Process Modeling* — LP and yield vector
+      modeling approaches for CDU and downstream units.
+    - Williams — *Model Building in Mathematical Programming* (5th Ed.) — General LP/MIP
+      formulation patterns used in the constraint design.
+
+    **Pooling & Advanced Optimization (Future Phases):**
+    - Haverly (1978) — Original pooling problem formulation for refinery blending with
+      nonlinear property specifications.
+    - Misener & Floudas (2009) — Global optimization approaches for pooling problems.
+    - Neiro & Pinto (2004) — Integrated supply chain optimization for refinery-petrochemical
+      complexes.
+
+    **Technology Stack:**
+    - [Streamlit](https://streamlit.io) — Web application framework
+    - [SciPy](https://scipy.org) — Scientific computing and LP solver
+    - [Anthropic Claude](https://anthropic.com) — AI assistant used for code generation
+      via Claude Code and the agentic chat interface
+    - [Pyomo](https://www.pyomo.org) — Algebraic modeling language (available as alternate backend)
+
+    **Development Methodology:**
+    - Built using spec-first development with `CLAUDE.md` guard files
+    - Regression-anchored testing (hand-verified LP optima locked before extending)
+    - Incremental, tested phases — each component verified before integration
+    """)
+
+    st.markdown("---")
+    st.caption("ARP v0.1 — Built with Claude Code | github.com/maulik18755-pixel/arp")
