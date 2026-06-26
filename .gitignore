@@ -1,0 +1,4 @@
+__pycache__/
+.venv/
+data/scenarios/*.json
+data/learning_log.jsonl
